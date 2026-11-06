@@ -46,8 +46,8 @@ The following commands are for Windows PowerShell.
 ### 1. Clone the repository
 
 ```powershell
-git clone https://github.com/<YOUR-USERNAME>/<YOUR-REPOSITORY>.git
-cd <YOUR-REPOSITORY>
+git clone https://github.com/chandrakant1212/Kuku-PromoFinder-AI.git
+cd Kuku-PromoFinder-AI
 ```
 
 If you already have the project locally, open PowerShell in the project root and skip this step.
