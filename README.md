@@ -1,9 +1,9 @@
 # Kuku PromoFinder AI
 ### Gemini-Assisted Promotional Clip Discovery and Recommendation
 
-Kuku PromoFinder AI is a Streamlit-based tool that analyzes screenplay events and identifies promising 20–60 second promotional clip candidates. It uses Google Gemini for candidate discovery and editorial evaluation, while Python enforces timestamp validity, clip-duration constraints, and final recommendation diversity.
+Kuku PromoFinder AI is a Streamlit-based tool that analyzes screenplay events and identifies promising 20–60 second promotional clip candidates. It uses Google Gemini for candidate discovery and editorial evaluation, while Python enforces timestamp validity, clip-duration constraints, editorial eligibility, and final recommendation diversity.
 
-The application exports ranked recommendations in JSON and CSV formats, with an audit trail that preserves discovered candidates and explains why some candidates were suppressed.
+The application exports ranked recommendations in JSON and CSV formats, with an audit trail that preserves discovered candidates and explains why some candidates were excluded or suppressed.
 
 ## Key Features
 
@@ -11,9 +11,10 @@ The application exports ranked recommendations in JSON and CSV formats, with an 
 - **Timestamp validation:** Resolves Gemini-selected event IDs against original screenplay timestamps instead of accepting arbitrary model-generated timestamps.
 - **Clip-duration enforcement:** Validates that candidates are between 20 and 60 seconds and remain within episode boundaries.
 - **Editorial evaluation:** Evaluates candidates for hook strength, cliffhanger potential, emotional intensity, standalone clarity, risks, and overall recommendation.
-- **Diverse recommendations:** Applies temporal non-maximum suppression (NMS) and a configurable per-episode recommendation cap.
+- **Deterministic editorial quality gate:** Allows only explicit `strong` and `consider` recommendations into the final shortlist. Excludes `reject` and missing/unknown recommendation labels regardless of numeric score.
+- **Diverse recommendations:** Applies temporal non-maximum suppression (NMS) and a configurable per-episode recommendation cap after editorial eligibility filtering.
 - **Checkpoint and resume:** Reuses successful discovery and evaluation results across runs and allows pending evaluations to be resumed.
-- **Exportable results:** Produces raw JSON output and ranked CSV recommendations.
+- **Exportable results:** Produces raw JSON output and ranked CSV recommendations with exclusion/suppression reasons.
 - **Heuristic baseline:** Provides a non-LLM baseline for comparison. It should not be interpreted as an AI editorial judgment.
 
 ## How It Works
@@ -23,14 +24,31 @@ The application exports ranked recommendations in JSON and CSV formats, with an 
 3. **Timestamp resolution and validation:** Python resolves the returned IDs to the original timestamps and rejects missing IDs, invalid ordering, out-of-range clips, and durations outside 20–60 seconds.
 4. **Excerpt construction:** Builds the exact screenplay excerpt for each selected interval. Displayed event timestamps are clipped to the promo interval.
 5. **Editorial evaluation:** Gemini evaluates selected candidates for hook, cliffhanger, emotional intensity, standalone clarity, risks, and recommendation.
-6. **Diversity selection:** A deterministic post-processing stage reduces excessive overlap and limits the number of recommendations from each episode.
-7. **Export:** The application provides raw candidate data and final ranked recommendations in JSON and CSV formats.
+6. **Editorial quality gate:** Python deterministically permits `strong` and `consider`; it excludes `reject` and missing/unknown decisions. A high numeric score cannot override an explicit rejection.
+7. **Diversity selection:** Eligible candidates pass through temporal NMS and a per-episode recommendation cap.
+8. **Export:** The application provides raw candidate data and final ranked recommendations in JSON and CSV formats.
+
+## Editorial Quality Gate
+
+The final recommendation stage uses the categorical Gemini recommendation separately from the weighted numeric score.
+
+| Gemini recommendation | Final shortlist treatment |
+|---|---|
+| `strong` | Eligible |
+| `consider` | Eligible |
+| `reject` | Excluded |
+| Missing or unrecognized | Excluded |
+
+This prevents a candidate explicitly rejected by the editorial evaluator from entering the final shortlist merely because its weighted score is high. Excluded candidates remain in the raw JSON audit output with an exclusion reason, so the decision is transparent and reviewable.
+
+The gate is deterministic post-processing; it does not change Gemini's evaluation or erase the original evaluation data. Human editorial review remains necessary.
 
 ## Technology
 
 - Python
 - Streamlit
 - Google Gemini API
+- pytest and GitHub Actions
 - JSON and CSV for result exports
 
 ## Requirements
@@ -52,54 +70,52 @@ cd Kuku-PromoFinder-AI
 
 If you already have the project locally, open PowerShell in the project root and skip this step.
 
-### 2. Create a virtual environment
+### 2. Create and activate a virtual environment
 
 ```powershell
 python -m venv venv
-```
-
-### 3. Activate the virtual environment
-
-```powershell
 venv\Scripts\Activate.ps1
 ```
 
-If PowerShell blocks activation, run this command in the current PowerShell session and activate again:
+If PowerShell blocks activation:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 venv\Scripts\Activate.ps1
 ```
 
-### 4. Install dependencies
+### 3. Install dependencies
 
 ```powershell
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
-### 5. Configure the Gemini API key
+### 4. Configure the Gemini API key
 
-Create a file named `.env` in the project root:
+Create a `.env` file in the project root:
 
 ```env
 GEMINI_API_KEY=your_actual_api_key
-GEMINI_MODEL=gemini-flash-lite-latest
+GEMINI_MODEL=gemini-3.5-flash-lite
 ```
 
-Replace the placeholder with your own API key.
-
-**Security:** Never commit `.env`, paste your API key into source code, or publish it in screenshots or logs. Keep `.env` excluded through `.gitignore`.
+Never commit `.env` or expose your API key in source code, screenshots, or logs.
 
 ## Run the Application
-
-From the project root, with the virtual environment activated:
 
 ```powershell
 streamlit run app.py
 ```
 
-Streamlit will provide a local URL in the terminal. Open that URL in your browser to use the application.
+## Run Automated Tests
+
+```powershell
+python -m pytest -v
+```
+
+GitHub Actions runs the test suite on pushes to `main` and pull requests targeting `main`.
 
 ## Discovery and Evaluation Controls
 
@@ -113,7 +129,7 @@ The application separates candidate discovery from Gemini evaluation.
 
 ## Recommendation Diversity
 
-After Gemini evaluates the candidates, PromoFinder applies a deterministic editorial selection stage.
+After editorial eligibility filtering, PromoFinder applies deterministic diversity selection.
 
 ### Temporal non-maximum suppression (NMS)
 
@@ -121,31 +137,21 @@ Candidates are compared only within the same episode. A lower-ranked candidate i
 
 ### Per-episode recommendation cap
 
-The final recommendation list has a configurable maximum number of promos per episode. The default is 3, helping prevent a single episode from dominating the final shortlist.
+The final recommendation list has a configurable maximum number of promos per episode. The default is 3.
 
 ### Audit trail
 
-The complete discovery output retains all candidates, including suppressed candidates and their suppression reasons. Separate JSON and CSV exports contain the final diverse recommendations.
-
-The overlap threshold and per-episode cap can be adjusted in the Streamlit interface. NMS is applied after evaluation so that the higher-scoring overlapping candidate is retained.
+The complete discovery output retains evaluated candidates, including editorially excluded candidates and candidates suppressed by temporal overlap or the per-episode cap. The `suppression.reason` field distinguishes `editorial_reject`, `editorial_approval_missing_or_invalid`, `temporal_overlap`, and `episode_limit`.
 
 ## Reliability and Resume Support
 
-PromoFinder includes mechanisms to make API processing more resilient:
-
-- A shared Gemini request-pacing mechanism applies to discovery and evaluation. The default minimum interval is 5.5 seconds between requests.
-- Set `GEMINI_MIN_REQUEST_INTERVAL` to override the default request interval.
-- HTTP 429 responses honor Gemini's retry delay. If no retry delay is supplied, the client waits 60 seconds before retrying.
+- A shared Gemini request-pacing mechanism applies to discovery and evaluation.
+- HTTP 429 responses honor Gemini's retry delay. If no retry delay is supplied, the client waits before retrying.
 - Discovery results and successful evaluations are checkpointed in `data/run_checkpoint.json`.
 - When the same parsed input is run again, successful discovery and evaluation results can be reused.
-- Evaluation candidates are selected using heuristic pre-scores in a round-robin process across episodes.
-- Failed and pending candidates are excluded from final ranked recommendations but remain represented in the raw output where applicable.
+- Failed and pending candidates are excluded from final ranked recommendations but remain represented in raw output where applicable.
 
 ### Resume pending evaluations
-
-The evaluation limit is a per-run limit for new pending candidates, not a lifetime cap.
-
-To continue processing:
 
 1. Keep the same screenplay input files and their contents unchanged.
 2. Keep `data/run_checkpoint.json` in the same project folder.
@@ -153,46 +159,31 @@ To continue processing:
 4. Click **Discover and evaluate promos** again.
 5. Repeat until the pending count reaches zero.
 
-Successful results are reused, and the next batch of pending candidates is evaluated up to the configured limit. Failed Gemini calls are not treated as successful checkpointed evaluations and can be retried in a later run.
-
-To force a fresh run after changing code or when you want to discard cached results, delete:
-
-```text
-data/run_checkpoint.json
-```
-
-**Note:** The checkpoint is local to the project folder and machine. It is not automatically shared between machines or included in the project ZIP.
+Successful results are reused. Failed Gemini calls are not treated as successful checkpointed evaluations and can be retried in a later run.
 
 ## Outputs
 
-The application provides:
-
-- **Raw JSON:** Detailed discovery/evaluation data, including candidate-level information and the audit trail.
-- **Ranked CSV:** Tabular recommendations for review and further analysis.
-- **Final diverse recommendations:** The shortlist after the diversity-selection stage.
-
-Candidates that have not been successfully evaluated remain pending and are not included in the final ranked recommendations.
+- **Raw JSON:** Detailed discovery/evaluation data, including editorial exclusions and diversity suppression reasons.
+- **Final recommendations JSON:** Only candidates that pass editorial eligibility and diversity selection.
+- **Ranked CSV:** Tabular final recommendations for review and further analysis.
 
 ## Quality Considerations and Limitations
 
 - Candidate timestamps are derived from supplied event timestamps; Gemini does not directly choose arbitrary timestamps.
 - Python validates the 20–60 second duration and episode boundaries.
-- Event display timestamps are clipped to the selected promo interval. However, the original screenplay descriptions may describe an action that spans beyond the clip boundary.
+- The categorical editorial gate reduces explicit rejects but does not guarantee promotional success.
 - LLM recommendations are not guaranteed to be suitable promotional clips. Human review is necessary.
-- Chunk-based discovery can miss story context that spans distant parts of an episode. Episode logline/continuity context is used during evaluation, while discovery is primarily chunk-local.
+- Chunk-based discovery can miss story context that spans distant parts of an episode.
 - The free Gemini API tier may impose rate and quota limits.
 - A failed episode is recorded and does not stop processing of the remaining episodes.
 
 ## Security and GitHub Notes
 
-Before publishing the repository:
-
 - Keep `.env` out of Git.
 - Keep API keys out of source code, notebooks, screenshots, and committed logs.
 - Review generated JSON, CSV, and checkpoint files before committing. They may contain screenplay-derived or other input-specific data.
 - Do not publish screenplay files or other copyrighted/private input material unless you have permission.
-- Commit only files that are appropriate for public access.
 
 ## Project Status
 
-This project provides an AI-assisted workflow for discovering, evaluating, and ranking promotional clip candidates. Final editorial selection should include human review of the recommended clips.
+Kuku PromoFinder AI provides an AI-assisted workflow for discovering, evaluating, and ranking promotional clip candidates. It combines LLM-based editorial assessment with deterministic timestamp validation, recommendation eligibility rules, and diversity selection. Final editorial selection should include human review.

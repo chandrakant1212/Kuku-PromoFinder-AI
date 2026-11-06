@@ -311,9 +311,14 @@ if "parsed" in st.session_state:
         st.session_state["candidates"] = final_candidates
         st.session_state["suppressed_candidates"] = suppressed_candidates
         st.session_state["ranking_settings"] = {
-            "overlap_threshold": overlap_threshold,
-            "max_final_per_episode": max_final_per_episode
+        "overlap_threshold": overlap_threshold,
+        "max_final_per_episode": max_final_per_episode,
+        "editorial_policy": {
+        "eligible_recommendations": ["strong", "consider"],
+        "excluded_recommendations": ["reject", "missing_or_invalid"]
         }
+    }
+
 
 if "candidates" in st.session_state:
     candidates = st.session_state["candidates"]
@@ -326,7 +331,7 @@ if "candidates" in st.session_state:
     c1.metric("Gemini evaluated", gemini_count)
     c2.metric("Heuristic fallback", fallback_count)
     c3.metric("Pending", pending_count)
-    c4.metric("Suppressed duplicates / excess", len(suppressed))
+    c4.metric("Excluded / suppressed", len(suppressed))
     if st.session_state.get("discovery_summary"):
         st.caption(f"Discovery: {st.session_state['discovery_summary']['method']} · "
                    f"Episodes processed: {st.session_state['discovery_summary']['episodes_processed']} · "
@@ -349,7 +354,13 @@ if "candidates" in st.session_state:
         })
     st.subheader("Final diverse promo recommendations")
     settings = st.session_state.get("ranking_settings", {})
-    st.caption(f"Non-maximum suppression: overlap ≥ {settings.get('overlap_threshold', 0.5):.0%} of shorter clip · Maximum {settings.get('max_final_per_episode', 3)} recommendations per episode")
+    st.caption(
+    "Editorial gate: strong/consider only; reject or missing decisions excluded · "
+    f"Non-maximum suppression: overlap ≥ {settings.get('overlap_threshold', 0.5):.0%} "
+    f"of shorter clip · Maximum {settings.get('max_per_episode', settings.get('max_final_per_episode', 3))} "
+    "recommendations per episode"
+   )
+
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     for rank, x in enumerate(candidates[:20], 1):

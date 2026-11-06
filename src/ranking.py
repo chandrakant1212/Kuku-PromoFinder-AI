@@ -1,4 +1,4 @@
-"""Editorial ranking utilities for deduplication and episode diversity."""
+"""Editorial ranking utilities with deterministic quality gating and diversity selection."""
 
 
 def temporal_overlap_ratio(a, b):
@@ -21,18 +21,49 @@ def _rank_value(candidate):
     return float(candidate.get("heuristic_score", 0.0))
 
 
-def select_diverse_candidates(candidates, overlap_threshold=0.5, max_per_episode=3):
-    """Greedy NMS per episode, followed by a per-episode diversity cap.
+def _editorial_exclusion_reason(candidate):
+    """Return an exclusion reason unless the evaluator explicitly approved the clip."""
+    evaluation = candidate.get("evaluation") or {}
+    recommendation = str(evaluation.get("recommendation", "")).strip().lower()
 
-    A candidate is suppressed when at least `overlap_threshold` of its own
-    duration overlaps an already selected, higher-ranked candidate in the
-    same episode. Returns (selected, suppressed) without mutating inputs.
+    if recommendation == "reject":
+        return "editorial_reject"
+    if recommendation not in {"strong", "consider"}:
+        return "editorial_approval_missing_or_invalid"
+    return None
+
+
+def select_diverse_candidates(candidates, overlap_threshold=0.5, max_per_episode=3):
+    """Apply editorial approval, then greedy NMS and a per-episode diversity cap.
+
+    Only candidates explicitly marked `strong` or `consider` are eligible.
+    `reject` and missing/unknown recommendations are retained in the returned
+    suppressed/audit list with an editorial exclusion reason.
+
+    A candidate is suppressed for overlap when at least `overlap_threshold` of
+    its own duration overlaps an already selected, higher-ranked candidate in
+    the same episode. Returns (selected, suppressed) without mutating inputs.
     """
     ordered = sorted(candidates, key=_rank_value, reverse=True)
     selected, suppressed = [], []
-    episode_counts = {}
+    eligible = []
 
     for candidate in ordered:
+        exclusion_reason = _editorial_exclusion_reason(candidate)
+        if exclusion_reason:
+            item = dict(candidate)
+            item["selection_status"] = "excluded"
+            item["suppression"] = {
+                "reason": exclusion_reason,
+                "overlap_ratio": 0.0,
+                "suppressed_by": None
+            }
+            suppressed.append(item)
+        else:
+            eligible.append(candidate)
+
+    episode_counts = {}
+    for candidate in eligible:
         reason = None
         for kept in selected:
             overlap = temporal_overlap_ratio(candidate, kept)
