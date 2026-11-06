@@ -17,7 +17,29 @@ from src.llm_analyzer import evaluate_with_gemini, evaluate_heuristically
 from src.scoring import final_score, validate_candidate
 from src.ranking import select_diverse_candidates
 
+
 load_dotenv()
+
+def load_runtime_secrets():
+    """Load Streamlit Cloud secrets into environment variables."""
+
+    # Local .env takes priority.
+    if os.getenv("GEMINI_API_KEY"):
+        return
+
+    # Access Streamlit secrets only when a cloud key is needed.
+    try:
+        secrets = st.secrets
+    except Exception:
+        return
+
+    for key in ["GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_MIN_REQUEST_INTERVAL"]:
+        value = secrets.get(key)
+        if value:
+            os.environ[key] = str(value)
+
+
+load_runtime_secrets()
 
 CHECKPOINT_PATH = Path("data/run_checkpoint.json")
 
@@ -122,10 +144,13 @@ if "parsed" in st.session_state:
     env_key = os.getenv("GEMINI_API_KEY")
     model = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
     if env_key:
-        st.success(f"Gemini API key loaded from .env · Model: {model}")
+       st.success(f"Gemini API configured · Model: {model}")
     else:
-        st.warning("GEMINI_API_KEY not found. Add it to .env in the project root and restart Streamlit.")
-
+       st.warning(
+        "GEMINI_API_KEY not found. Configure it in your local .env "
+        "file or Streamlit Cloud Secrets."
+    )
+    
     discovery_method = st.radio(
         "Candidate discovery method",
         ["Gemini-assisted discovery (recommended)", "Heuristic baseline (comparison/fallback)"],
