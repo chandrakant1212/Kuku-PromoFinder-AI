@@ -76,8 +76,10 @@ def evaluate_with_gemini(candidate, api_key=None, model=None, max_retries=3):
     key = api_key or os.getenv("GEMINI_API_KEY")
     model_name = model or os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
     if not key:
-        raise RuntimeError("GEMINI_API_KEY is missing. Add it to your .env file.")
-
+        raise RuntimeError(
+    "GEMINI_API_KEY is missing. Configure it in your environment, "
+    ".env file, or Streamlit Cloud Secrets."
+        )
     try:
         from google import genai
         from google.genai import types
